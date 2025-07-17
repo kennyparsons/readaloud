@@ -6,11 +6,14 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
 	"github.com/surfaceyu/edge-tts-go/edgeTTS"
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
@@ -159,35 +162,27 @@ func loadConfig() (*Config, error) {
 }
 
 func playAudio(filePath string) {
-	var cmdName string
-	var cmdArgs []string
-
-	switch runtime.GOOS {
-	case "darwin":
-		cmdName = "afplay"
-		cmdArgs = []string{filePath}
-	case "linux":
-		// Try mpg123 first, then play (sox)
-		if _, err := os.Stat("/usr/bin/mpg123"); err == nil {
-			cmdName = "mpg123"
-			cmdArgs = []string{filePath}
-		} else if _, err := os.Stat("/usr/bin/play"); err == nil {
-			cmdName = "play"
-			cmdArgs = []string{filePath}
-		} else {
-			log.Println("Warning: No suitable audio player found (mpg123 or play). Please install one to enable audio playback.")
-			return
-		}
-	default:
-		log.Printf("Warning: Audio playback not supported on %s.", runtime.GOOS)
+	f, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("Error opening audio file: %v", err)
 		return
 	}
+	defer f.Close()
 
-	fmt.Printf("Playing audio with %s %s\n", cmdName, strings.Join(cmdArgs, " "))
-	cmd := exec.Command(cmdName, cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		log.Printf("Error playing audio: %v", err)
+	streamer, format, err := mp3.Decode(f)
+	if err != nil {
+		log.Printf("Error decoding MP3: %v", err)
+		return
 	}
+	defer streamer.Close()
+
+	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)) // Initialize speaker with correct sample rate
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	speaker.Play(beep.Seq(streamer, beep.Callback(func() {
+		wg.Done()
+	})))
+
+	wg.Wait()
 }
