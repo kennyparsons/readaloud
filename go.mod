@@ -18,4 +18,4 @@ require (
 
 replace github.com/kennyparsons/edge-tts-go => ../
 
-replace github.com/surfaceyu/edge-tts-go => ../edge-tts-go
+replace github.com/surfaceyu/edge-tts-go => ./edge-tts-go
