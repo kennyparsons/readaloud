@@ -36,6 +36,8 @@ func main() {
 		volumeFlag     string
 		textFilePath   string
 		writeMediaFile string
+		saveDir        string
+		name           string
 	)
 
 	pflag.StringVarP(&voiceFlag, "voice", "v", "", "Voice for TTS (e.g., en-US-AriaNeural)")
@@ -43,6 +45,8 @@ func main() {
 	pflag.StringVarP(&volumeFlag, "volume", "u", "", "Set TTS volume (e.g., 0%)")
 	pflag.StringVarP(&textFilePath, "file", "f", "", "Path to a text file for TTS input")
 	pflag.StringVarP(&writeMediaFile, "write-media", "w", "", "Write media output to file instead of playing (MP3)")
+	pflag.StringVarP(&saveDir, "save-dir", "s", "", "Directory to save output files")
+	pflag.StringVarP(&name, "name", "n", "", "Sub-folder name for sequential saving (requires -s)")
 
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage of %s:
@@ -56,6 +60,10 @@ Options:
 	}
 
 	pflag.Parse()
+
+	if name != "" && saveDir == "" {
+		log.Fatalf("Error: --name flag requires --save-dir flag to be set.")
+	}
 
 	// Load config from file
 	config, err := loadConfig()
@@ -122,16 +130,51 @@ Options:
 		tts := edgeTTS.NewTTS(args)
 		tts.AddText(args.Text, args.Voice, args.Rate, args.Volume)
 		tts.Speak()
+	} else if saveDir != "" {
+		// Create the save directory if it doesn't exist
+		outputDir := saveDir
+		if name != "" {
+			outputDir = filepath.Join(saveDir, name)
+		}
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			log.Fatalf("Error creating output directory %s: %v", outputDir, err)
+		}
+
+		const chunkSize = 100 // words
+		chunks := chunkTextByWords(inputText, chunkSize)
+		totalChunks := len(chunks)
+		padding := len(fmt.Sprintf("%d", totalChunks))
+
+		for i, chunk := range chunks {
+			outputFileName := fmt.Sprintf("%0*d.mp3", padding, i+1)
+			outputFilePath := filepath.Join(outputDir, outputFileName)
+
+			log.Printf("Synthesizing chunk (%d/%d) to %s...", i+1, totalChunks, outputFilePath)
+
+			args := edgeTTS.Args{
+				Text:       chunk,
+				Voice:      config.Voice,
+				Rate:       config.Rate,
+				Volume:     config.Volume,
+				WriteMedia: outputFilePath,
+			}
+			tts := edgeTTS.NewTTS(args)
+			tts.AddText(args.Text, args.Voice, args.Rate, args.Volume)
+			tts.Speak()
+			log.Printf("Chunk %d saved.", i+1)
+		}
+		log.Printf("All chunks saved to %s", outputDir)
 	} else {
 		// Streaming playback
 		const chunkSize = 100 // words
 		chunks := chunkTextByWords(inputText, chunkSize)
+		totalChunks := len(chunks)
 		audioQueue := make(chan string, 1) // Channel to hold the file path of the next audio chunk
 
 		// Producer goroutine: fetches audio chunks
 		go func() {
 			for i, chunk := range chunks {
-				log.Printf("Sending chunk %d for synthesis...", i+1)
+				log.Printf("Sending chunk (%d/%d) for synthesis...", i+1, totalChunks)
 				tempFile, err := ioutil.TempFile("", fmt.Sprintf("readaloud-chunk-%d-*.mp3", i))
 				if err != nil {
 					log.Fatalf("Error creating temporary file: %v", err)
@@ -158,7 +201,6 @@ Options:
 		// Consumer: plays audio chunks from the queue
 		for audioFile := range audioQueue {
 			log.Printf("Playing audio from %s", filepath.Base(audioFile))
-			playAudio(audioFile)
 			os.Remove(audioFile) // Clean up the chunk file after playing
 		}
 	}
