@@ -14,8 +14,8 @@ import (
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
-	"github.com/surfaceyu/edge-tts-go/edgeTTS"
 	"github.com/spf13/pflag"
+	"github.com/surfaceyu/edge-tts-go/edgeTTS"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,6 +27,45 @@ type Config struct {
 	Voice  string `yaml:"voice"`
 	Rate   string `yaml:"rate"`
 	Volume string `yaml:"volume"`
+}
+
+func synthesizeWithRetry(args edgeTTS.Args, maxRetries int, timeout time.Duration) error {
+	var lastErr error
+	for i := 0; i <= maxRetries; i++ {
+		done := make(chan struct{})
+		errChan := make(chan error, 1)
+
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					errChan <- fmt.Errorf("panic during TTS synthesis: %v", r)
+				}
+			}()
+			tts := edgeTTS.NewTTS(args)
+			if tts == nil {
+				errChan <- fmt.Errorf("failed to create TTS object for media file: %s", args.WriteMedia)
+				return
+			}
+			tts.AddText(args.Text, args.Voice, args.Rate, args.Volume)
+			tts.Speak()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			if i > 0 {
+				log.Printf("TTS synthesis succeeded after %d retries.", i)
+			}
+			return nil // Success
+		case err := <-errChan:
+			lastErr = err
+			log.Printf("Warning: TTS synthesis failed: %v. Retrying (%d/%d)...", err, i+1, maxRetries)
+		case <-time.After(timeout):
+			lastErr = fmt.Errorf("TTS synthesis timed out after %v", timeout)
+			log.Printf("Warning: %v. Retrying (%d/%d)...", lastErr, i+1, maxRetries)
+		}
+	}
+	return fmt.Errorf("TTS synthesis failed after %d retries: %w", maxRetries, lastErr)
 }
 
 func main() {
@@ -116,6 +155,9 @@ Options:
 		log.Fatalf("Error: Input text is empty.")
 	}
 
+	const maxRetries = 10
+	const timeout = 10 * time.Second
+
 	// If writing to a file, use the old method. Otherwise, use the new streaming method.
 	if writeMediaFile != "" {
 		// Prepare TTS arguments
@@ -127,9 +169,9 @@ Options:
 			WriteMedia: writeMediaFile,
 		}
 		// Generate audio
-		tts := edgeTTS.NewTTS(args)
-		tts.AddText(args.Text, args.Voice, args.Rate, args.Volume)
-		tts.Speak()
+		if err := synthesizeWithRetry(args, maxRetries, timeout); err != nil {
+			log.Fatalf("Error synthesizing audio to %s: %v", writeMediaFile, err)
+		}
 	} else if saveDir != "" {
 		// Create the save directory if it doesn't exist
 		outputDir := saveDir
@@ -141,6 +183,8 @@ Options:
 		}
 
 		const chunkSize = 100 // words
+		const requestsPerMinute = 20
+		const delay = time.Second * 60 / requestsPerMinute
 		chunks := chunkTextByWords(inputText, chunkSize)
 		totalChunks := len(chunks)
 		padding := len(fmt.Sprintf("%d", totalChunks))
@@ -158,15 +202,22 @@ Options:
 				Volume:     config.Volume,
 				WriteMedia: outputFilePath,
 			}
-			tts := edgeTTS.NewTTS(args)
-			tts.AddText(args.Text, args.Voice, args.Rate, args.Volume)
-			tts.Speak()
+			if err := synthesizeWithRetry(args, maxRetries, timeout); err != nil {
+				log.Printf("Error synthesizing chunk %d to %s: %v. Skipping.", i+1, outputFilePath, err)
+				continue
+			}
 			log.Printf("Chunk %d saved.", i+1)
+			if i < totalChunks-1 {
+				log.Printf("Rate limiting: waiting for %v before next request", delay)
+				time.Sleep(delay)
+			}
 		}
 		log.Printf("All chunks saved to %s", outputDir)
 	} else {
 		// Streaming playback
 		const chunkSize = 100 // words
+		const requestsPerMinute = 8
+		const delay = time.Second * 60 / requestsPerMinute
 		chunks := chunkTextByWords(inputText, chunkSize)
 		totalChunks := len(chunks)
 		audioQueue := make(chan string, 1) // Channel to hold the file path of the next audio chunk
@@ -189,11 +240,17 @@ Options:
 					Volume:     config.Volume,
 					WriteMedia: outputFilePath,
 				}
-				tts := edgeTTS.NewTTS(args)
-				tts.AddText(args.Text, args.Voice, args.Rate, args.Volume)
-				tts.Speak()
+				if err := synthesizeWithRetry(args, maxRetries, timeout); err != nil {
+					log.Printf("Error synthesizing chunk %d: %v. Skipping.", i+1, err)
+					os.Remove(outputFilePath) // Clean up failed temp file
+					continue
+				}
 				log.Printf("Chunk %d received.", i+1)
 				audioQueue <- outputFilePath
+				if i < totalChunks-1 {
+					log.Printf("Rate limiting: waiting for %v before next request", delay)
+					time.Sleep(delay)
+				}
 			}
 			close(audioQueue)
 		}()
@@ -201,13 +258,14 @@ Options:
 		// Consumer: plays audio chunks from the queue
 		for audioFile := range audioQueue {
 			log.Printf("Playing audio from %s", filepath.Base(audioFile))
+			playAudio(audioFile)
 			os.Remove(audioFile) // Clean up the chunk file after playing
 		}
 	}
 }
 
 func chunkTextByWords(text string, chunkSize int) []string {
-	const wordTolerance = 10        // How many words +/- to look for a natural break.
+	const wordTolerance = 10            // How many words +/- to look for a natural break.
 	const newlineMarker = "||NEWLINE||" // A unique marker for newlines.
 
 	// Define the punctuation to look for, in order of priority.
