@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/kennyparsons/readaloud/compare/v1.0.0...v1.0.1) (2026-01-05)
+
+
+### Bug Fixes
+
+* switch build to macos-latest and enable CGO for darwin-only release ([6a1c745](https://github.com/kennyparsons/readaloud/commit/6a1c74546d99c7abb823cb995a47f3932c2a9b4f))
+
 # 1.0.0 (2026-01-05)
 
 
