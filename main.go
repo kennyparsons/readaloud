@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,7 +16,6 @@ import (
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
 	"github.com/spf13/pflag"
-	"github.com/surfaceyu/edge-tts-go/edgeTTS"
 	"gopkg.in/yaml.v3"
 )
 
@@ -29,41 +29,36 @@ type Config struct {
 	Volume string `yaml:"volume"`
 }
 
-func synthesizeWithRetry(args edgeTTS.Args, maxRetries int, timeout time.Duration) error {
+func synthesizeWithRetry(text, voice, rate, volume, output string, maxRetries int) error {
 	var lastErr error
 	for i := 0; i <= maxRetries; i++ {
-		done := make(chan struct{})
-		errChan := make(chan error, 1)
+		cmdArgs := []string{
+			"tts.js",
+			"--text", text,
+			"--output", output,
+		}
+		if voice != "" {
+			cmdArgs = append(cmdArgs, "--voice", voice)
+		}
+		if rate != "" {
+			cmdArgs = append(cmdArgs, "--rate", rate)
+		}
+		if volume != "" {
+			cmdArgs = append(cmdArgs, "--volume", volume)
+		}
 
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					errChan <- fmt.Errorf("panic during TTS synthesis: %v", r)
-				}
-			}()
-			tts := edgeTTS.NewTTS(args)
-			if tts == nil {
-				errChan <- fmt.Errorf("failed to create TTS object for media file: %s", args.WriteMedia)
-				return
-			}
-			tts.AddText(args.Text, args.Voice, args.Rate, args.Volume)
-			tts.Speak()
-			close(done)
-		}()
-
-		select {
-		case <-done:
+		cmd := exec.Command("node", cmdArgs...)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
 			if i > 0 {
 				log.Printf("TTS synthesis succeeded after %d retries.", i)
 			}
-			return nil // Success
-		case err := <-errChan:
-			lastErr = err
-			log.Printf("Warning: TTS synthesis failed: %v. Retrying (%d/%d)...", err, i+1, maxRetries)
-		case <-time.After(timeout):
-			lastErr = fmt.Errorf("TTS synthesis timed out after %v", timeout)
-			log.Printf("Warning: %v. Retrying (%d/%d)...", lastErr, i+1, maxRetries)
+			return nil
 		}
+
+		lastErr = fmt.Errorf("node error: %v, output: %s", err, string(out))
+		log.Printf("Warning: TTS synthesis failed: %v. Retrying (%d/%d)...", lastErr, i+1, maxRetries)
+		time.Sleep(time.Second * time.Duration(i+1))
 	}
 	return fmt.Errorf("TTS synthesis failed after %d retries: %w", maxRetries, lastErr)
 }
@@ -156,20 +151,11 @@ Options:
 	}
 
 	const maxRetries = 10
-	const timeout = 10 * time.Second
 
 	// If writing to a file, use the old method. Otherwise, use the new streaming method.
 	if writeMediaFile != "" {
-		// Prepare TTS arguments
-		args := edgeTTS.Args{
-			Text:       inputText,
-			Voice:      config.Voice,
-			Rate:       config.Rate,
-			Volume:     config.Volume,
-			WriteMedia: writeMediaFile,
-		}
 		// Generate audio
-		if err := synthesizeWithRetry(args, maxRetries, timeout); err != nil {
+		if err := synthesizeWithRetry(inputText, config.Voice, config.Rate, config.Volume, writeMediaFile, maxRetries); err != nil {
 			log.Fatalf("Error synthesizing audio to %s: %v", writeMediaFile, err)
 		}
 	} else if saveDir != "" {
@@ -195,14 +181,7 @@ Options:
 
 			log.Printf("Synthesizing chunk (%d/%d) to %s...", i+1, totalChunks, outputFilePath)
 
-			args := edgeTTS.Args{
-				Text:       chunk,
-				Voice:      config.Voice,
-				Rate:       config.Rate,
-				Volume:     config.Volume,
-				WriteMedia: outputFilePath,
-			}
-			if err := synthesizeWithRetry(args, maxRetries, timeout); err != nil {
+			if err := synthesizeWithRetry(chunk, config.Voice, config.Rate, config.Volume, outputFilePath, maxRetries); err != nil {
 				log.Printf("Error synthesizing chunk %d to %s: %v. Skipping.", i+1, outputFilePath, err)
 				continue
 			}
@@ -233,14 +212,7 @@ Options:
 				outputFilePath := tempFile.Name()
 				tempFile.Close() // Close the file so the TTS library can write to it
 
-				args := edgeTTS.Args{
-					Text:       chunk,
-					Voice:      config.Voice,
-					Rate:       config.Rate,
-					Volume:     config.Volume,
-					WriteMedia: outputFilePath,
-				}
-				if err := synthesizeWithRetry(args, maxRetries, timeout); err != nil {
+				if err := synthesizeWithRetry(chunk, config.Voice, config.Rate, config.Volume, outputFilePath, maxRetries); err != nil {
 					log.Printf("Error synthesizing chunk %d: %v. Skipping.", i+1, err)
 					os.Remove(outputFilePath) // Clean up failed temp file
 					continue

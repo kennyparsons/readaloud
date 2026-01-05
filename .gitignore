@@ -1,2 +1,4 @@
 readaloud
 GEMINI.md
+node_modules/
+*.mp3
