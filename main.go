@@ -23,6 +23,41 @@ const (
 	appName = "readaloud"
 )
 
+var ttsBundlePath string
+
+func getTTSBundlePath() (string, error) {
+	if ttsBundlePath != "" {
+		return ttsBundlePath, nil
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	configDir := filepath.Join(homeDir, ".config", appName)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	bundleFilename := fmt.Sprintf("tts-bundle-%s.js", version)
+	bundlePath := filepath.Join(configDir, bundleFilename)
+
+	// Check if the specific version of the bundle already exists
+	if _, err := os.Stat(bundlePath); err == nil {
+		ttsBundlePath = bundlePath
+		return ttsBundlePath, nil
+	}
+
+	// Write the embedded bundle to the file
+	if err := os.WriteFile(bundlePath, TTSBundle, 0644); err != nil {
+		return "", fmt.Errorf("failed to write TTS bundle to %s: %w", bundlePath, err)
+	}
+
+	ttsBundlePath = bundlePath
+	return ttsBundlePath, nil
+}
+
 type Config struct {
 	Voice  string `yaml:"voice"`
 	Rate   string `yaml:"rate"`
@@ -30,10 +65,15 @@ type Config struct {
 }
 
 func synthesizeWithRetry(text, voice, rate, volume, output string, maxRetries int) error {
+	scriptPath, err := getTTSBundlePath()
+	if err != nil {
+		return err
+	}
+
 	var lastErr error
 	for i := 0; i <= maxRetries; i++ {
 		cmdArgs := []string{
-			"tts.js",
+			scriptPath,
 			"--text", text,
 			"--output", output,
 		}
