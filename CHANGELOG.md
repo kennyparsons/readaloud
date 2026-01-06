@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/kennyparsons/readaloud/compare/v1.1.0...v1.2.0) (2026-01-06)
+
+
+### Features
+
+* finalize self-contained TTS bundle implementation ([f36536e](https://github.com/kennyparsons/readaloud/commit/f36536ed20eeb1f27c6a701113c073e14f3fe2c7))
+
 # [1.1.0](https://github.com/kennyparsons/readaloud/compare/v1.0.1...v1.1.0) (2026-01-06)
 
 
