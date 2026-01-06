@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/kennyparsons/readaloud/compare/v1.0.1...v1.1.0) (2026-01-06)
+
+
+### Features
+
+* bundle tts.js dependencies, embed in Go binary, and extract to config dir on run ([8d1add2](https://github.com/kennyparsons/readaloud/commit/8d1add2ec822454d9f22fc95aef04362455ed04e))
+
 ## [1.0.1](https://github.com/kennyparsons/readaloud/compare/v1.0.0...v1.0.1) (2026-01-05)
 
 
