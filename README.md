@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-*   **Node.js**: This tool utilizes Travis' `universal-edge-tts` package, which is java/typescript. Therefore, it has an os requirement of `node` to be installed and available in your `$PATH`. As such, this project is more of a value-added wrapper around core tts project, allowing for easy config of voice, rate, saving audio, and speeding up playback by chunking. 
+*   **Node.js**: This tool utilizes [Travis'](https://github.com/travisvn/universal-edge-tts) `universal-edge-tts` package, which is java/typescript. Therefore, it has an os requirement of `node` to be installed and available in your `$PATH`. As such, this project is more of a value-added wrapper around the core tts project, allowing for easy config of voice, rate, saving audio, and speeding up playback by chunking. 
 
 ## Installation
 
