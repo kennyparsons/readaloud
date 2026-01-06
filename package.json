@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "esbuild tts.js --bundle --platform=node --outfile=dist/tts.bundle.js"
+    "build": "esbuild tts.js --bundle --platform=node --outfile=build/tts.bundle.js"
   },
   "repository": {
     "type": "git",

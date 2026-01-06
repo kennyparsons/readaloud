@@ -4,5 +4,5 @@ import (
 	_ "embed"
 )
 
-//go:embed dist/tts.bundle.js
+//go:embed build/tts.bundle.js
 var TTSBundle []byte
